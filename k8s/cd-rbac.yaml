@@ -1,0 +1,54 @@
+# One-time bootstrap: the identity GitHub Actions uses to deploy.
+# Apply once with your admin credentials:  kubectl apply -f k8s/cd-rbac.yaml
+#
+# This creates a Kubernetes ServiceAccount (NOT a Google service account) plus
+# a Role scoped to the gke-app namespace. CI authenticates AS this ServiceAccount
+# directly against the Kubernetes API — no gcloud involved.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-deployer
+  namespace: gke-app
+---
+# Namespaced permissions only — can manage the app's workloads in gke-app,
+# and nothing anywhere else in the cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-deployer
+  namespace: gke-app
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["services", "pods"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-deployer
+  namespace: gke-app
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer
+    namespace: gke-app
+roleRef:
+  kind: Role
+  name: github-deployer
+  apiGroup: rbac.authorization.k8s.io
+---
+# A long-lived bearer token for the ServiceAccount (k8s 1.24+ no longer
+# auto-creates these). CI reads this token from a GitHub secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-deployer-token
+  namespace: gke-app
+  annotations:
+    kubernetes.io/service-account.name: github-deployer
+type: kubernetes.io/service-account-token

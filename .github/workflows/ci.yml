@@ -32,3 +32,41 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # Continuous deployment: connect DIRECTLY to the Kubernetes API with a
+  # ServiceAccount token (no gcloud, no Google auth). Runs only after tests
+  # pass, and only on a push to main.
+  deploy:
+    name: Deploy to GKE (Kubernetes API)
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install kubectl (vendor-neutral, no cloud SDK)
+        run: |
+          curl -fsSLO "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      - name: Build kubeconfig from secrets (talk to the Kubernetes API directly)
+        run: |
+          echo "${{ secrets.K8S_CA }}" | base64 -d > ca.crt
+          kubectl config set-cluster gke \
+            --server="${{ secrets.K8S_SERVER }}" \
+            --certificate-authority=ca.crt --embed-certs=true
+          kubectl config set-credentials github-deployer \
+            --token="${{ secrets.K8S_TOKEN }}"
+          kubectl config set-context gke \
+            --cluster=gke --user=github-deployer --namespace=gke-app
+          kubectl config use-context gke
+
+      - name: Deploy workloads
+        run: kubectl apply -k k8s/overlays/cd
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/backend  -n gke-app --timeout=120s
+          kubectl rollout status deployment/frontend -n gke-app --timeout=120s
