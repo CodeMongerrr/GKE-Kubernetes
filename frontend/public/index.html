@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GKE Demo</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; }
+      button { font-size: 1rem; padding: 0.5rem 1rem; cursor: pointer; }
+      pre { background: #f4f4f5; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Frontend → Backend on GKE</h1>
+    <p>Click the button to call the backend through the cluster. Watch the
+       <code>pod</code> hostname change as the load balancer spreads requests.</p>
+    <button onclick="callBackend()">Call backend</button>
+    <pre id="output">(no response yet)</pre>
+    <script>
+      async function callBackend() {
+        const out = document.getElementById("output");
+        out.textContent = "loading...";
+        try {
+          const r = await fetch("/api");
+          out.textContent = JSON.stringify(await r.json(), null, 2);
+        } catch (err) {
+          out.textContent = "Error: " + err;
+        }
+      }
+    </script>
+  </body>
+</html>

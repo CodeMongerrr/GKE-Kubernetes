@@ -5,3 +5,5 @@ resources:
   - namespace.yaml
   - frontend-deployment.yaml
   - backend-deployment.yaml
+  - backend-hpa.yaml
+  - frontend-hpa.yaml

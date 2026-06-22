@@ -1,0 +1,38 @@
+# Temporary load generator — hammers the backend /load endpoint to push CPU
+# past the HPA's 50% target so you can watch backend scale up.
+# Delete it with: kubectl delete -f k8s/loadgen.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: gke-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      containers:
+        - name: loadgen
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              while true; do
+                for i in 1 2 3 4 5; do
+                  wget -q -O- http://backend-service:8080/load >/dev/null 2>&1 &
+                done
+                wait
+              done
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "50m"
+              memory: "32Mi"
