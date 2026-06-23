@@ -7,3 +7,5 @@ resources:
   - backend-deployment.yaml
   - backend-hpa.yaml
   - frontend-hpa.yaml
+  - backend-pdb.yaml
+  - frontend-pdb.yaml

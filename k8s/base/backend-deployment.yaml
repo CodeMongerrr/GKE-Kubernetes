@@ -7,6 +7,16 @@ metadata:
     app: backend
 spec:
   replicas: 2
+  # Fail the rollout (instead of hanging) if it doesn't make progress in 120s.
+  progressDeadlineSeconds: 120
+  # Remove an old pod BEFORE creating the new one (no surge). The nodes are tiny
+  # and run near full, so there's no spare CPU to surge into. The PDB
+  # (minAvailable: 1) still guarantees one pod stays serving throughout.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: backend
@@ -15,6 +25,18 @@ spec:
       labels:
         app: backend
     spec:
+      # Prefer placing the 2 replicas on different nodes so a single node
+      # failure can't take out the whole backend. "preferred" (soft) so that
+      # when the HPA scales beyond the node count, extra pods still schedule.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: backend
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: backend
           image: backend:latest

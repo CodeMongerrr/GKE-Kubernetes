@@ -44,3 +44,22 @@ variable "environment" {
   type        = string
   default     = "dev"
 }
+
+# --- CI/CD (GitHub Actions -> Artifact Registry via Workload Identity Federation) ---
+
+variable "github_repository" {
+  description = "GitHub repo allowed to push images, as owner/name (e.g. CodeMongerrr/GKE-Kubernetes)"
+  type        = string
+}
+
+variable "ar_location" {
+  description = "Artifact Registry location (must match the image paths in k8s overlays)"
+  type        = string
+  default     = "asia-southeast1"
+}
+
+variable "ar_repository" {
+  description = "Artifact Registry repository name that holds the app images"
+  type        = string
+  default     = "gke-app"
+}

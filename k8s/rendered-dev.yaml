@@ -12,6 +12,12 @@ metadata:
     app: backend
 spec:
   replicas: 2
+  progressDeadlineSeconds: 120
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: backend
@@ -20,6 +26,15 @@ spec:
       labels:
         app: backend
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: backend
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: backend
           image: asia-southeast1-docker.pkg.dev/project-aa0faf06-c115-438a-a36/gke-app/backend:dev
@@ -67,6 +82,12 @@ metadata:
     app: frontend
 spec:
   replicas: 2
+  progressDeadlineSeconds: 120
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: frontend
@@ -75,6 +96,15 @@ spec:
       labels:
         app: frontend
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: frontend
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: frontend
           image: asia-southeast1-docker.pkg.dev/project-aa0faf06-c115-438a-a36/gke-app/frontend:dev
@@ -152,3 +182,25 @@ spec:
         target:
           type: Utilization
           averageUtilization: 50
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+  namespace: gke-app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: backend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: gke-app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: frontend

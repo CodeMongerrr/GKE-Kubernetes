@@ -4,14 +4,27 @@ const os = require("os");
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// The git commit this image was built from. Baked in at `docker build` time
+// (see Dockerfile ARG/ENV GIT_SHA) and injected by CI as ${{ github.sha }}.
+// This is the value you watch change to PROVE a new image actually rolled out.
+const COMMIT = process.env.GIT_SHA || "dev";
+
 // Main endpoint — returns the pod's hostname so you can SEE load balancing
 // spread requests across multiple backend pods.
 app.get("/", (req, res) => {
   res.json({
     message: "Hello from the backend!",
     pod: os.hostname(),
+    commit: COMMIT,
     time: new Date().toISOString(),
   });
+});
+
+// Version endpoint — returns the build's git commit. Curl this after a deploy
+// to confirm the running image changed (the commit should match the SHA you
+// just pushed to main).
+app.get("/version", (req, res) => {
+  res.json({ commit: COMMIT, pod: os.hostname() });
 });
 
 // Health check — used by Kubernetes liveness/readiness probes.

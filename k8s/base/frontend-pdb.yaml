@@ -1,0 +1,13 @@
+# Keep at least 1 frontend pod serving during voluntary disruptions
+# (node drains, GKE auto-upgrades). Stops Kubernetes from evicting both
+# replicas at once.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: gke-app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: frontend
