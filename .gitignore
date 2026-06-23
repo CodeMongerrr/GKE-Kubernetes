@@ -19,6 +19,7 @@ infrastructure/terraform/*.tfvars
 # GCP
 *.json
 !package.json
+!package-lock.json
 !tsconfig.json
 
 # IDE

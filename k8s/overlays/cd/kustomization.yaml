@@ -1,0 +1,31 @@
+# Used by the GitHub Actions CD job.
+# Deploys ONLY the app workloads into the (already-existing) gke-app namespace.
+# It pulls in the base, then DELETES the Namespace object from the output, so the
+# CI ServiceAccount needs only namespaced RBAC (no cluster-scoped permissions).
+# The namespace, ServiceAccount and RBAC are created once at bootstrap
+# (see k8s/cd-rbac.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gke-app
+
+resources:
+  - ../../base
+
+images:
+  - name: backend
+    newName: asia-southeast1-docker.pkg.dev/project-aa0faf06-c115-438a-a36/gke-app/backend
+    newTag: dev
+  - name: frontend
+    newName: asia-southeast1-docker.pkg.dev/project-aa0faf06-c115-438a-a36/gke-app/frontend
+    newTag: dev
+
+# Drop the Namespace object — it's bootstrap infrastructure, not something CD
+# should manage. Keeps the CI identity's RBAC purely namespaced.
+patches:
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: gke-app

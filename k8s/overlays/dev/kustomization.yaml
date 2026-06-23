@@ -6,10 +6,10 @@ resources:
 
 images:
   - name: frontend
-    newName: gcr.io/PROJECT_ID/frontend
+    newName: asia-southeast1-docker.pkg.dev/project-aa0faf06-c115-438a-a36/gke-app/frontend
     newTag: dev
   - name: backend
-    newName: gcr.io/PROJECT_ID/backend
+    newName: asia-southeast1-docker.pkg.dev/project-aa0faf06-c115-438a-a36/gke-app/backend
     newTag: dev
 
 patches:
