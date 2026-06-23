@@ -5,6 +5,11 @@ on:
     branches: [ main ]
   pull_request:
 
+# Artifact Registry coordinates (must match the image paths in k8s/overlays/cd).
+env:
+  AR_LOCATION: asia-southeast1-docker.pkg.dev
+  AR_REPO: asia-southeast1-docker.pkg.dev/project-aa0faf06-c115-438a-a36/gke-app
+
 jobs:
   test:
     name: Test ${{ matrix.service }}
@@ -33,12 +38,55 @@ jobs:
       - name: Run tests
         run: npm test
 
+  # Build a fresh image from the pushed source and push it to Artifact Registry,
+  # tagged with the immutable commit SHA (and a moving :dev tag). Without this
+  # step the cluster would only ever run a stale image. Auth uses Workload
+  # Identity Federation — GitHub's OIDC token is exchanged for short-lived GCP
+  # credentials, so there is NO long-lived service-account key in secrets.
+  build-push:
+    name: Build & push ${{ matrix.service }}
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # REQUIRED for WIF (mints the OIDC token)
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [ backend, frontend ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF — no stored key)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - name: Configure Docker to push to Artifact Registry
+        run: gcloud auth configure-docker "$AR_LOCATION" --quiet
+
+      - name: Build & push image (tagged with the commit SHA)
+        run: |
+          IMAGE="$AR_REPO/${{ matrix.service }}"
+          docker build \
+            --build-arg GIT_SHA="${{ github.sha }}" \
+            -t "$IMAGE:${{ github.sha }}" \
+            -t "$IMAGE:dev" \
+            "./${{ matrix.service }}"
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:dev"
+
   # Continuous deployment: connect DIRECTLY to the Kubernetes API with a
-  # ServiceAccount token (no gcloud, no Google auth). Runs only after tests
-  # pass, and only on a push to main.
+  # ServiceAccount token (no gcloud, no Google auth). Runs only after the images
+  # are built+pushed, and only on a push to main. We rewrite the image tag to
+  # THIS commit's SHA so the rendered manifest actually changes — that diff is
+  # what makes `kubectl apply` trigger a real rolling update.
   deploy:
     name: Deploy to GKE (Kubernetes API)
-    needs: test
+    needs: build-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +98,13 @@ jobs:
           curl -fsSLO "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
           kubectl version --client
+
+      - name: Install kustomize
+        run: |
+          KUSTOMIZE_VERSION=v5.4.3
+          curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" | tar -xz
+          chmod +x kustomize && sudo mv kustomize /usr/local/bin/kustomize
+          kustomize version
 
       - name: Build kubeconfig from secrets (talk to the Kubernetes API directly)
         run: |
@@ -63,10 +118,58 @@ jobs:
             --cluster=gke --user=github-deployer --namespace=gke-app
           kubectl config use-context gke
 
+      - name: Pin images to this commit (forces a real rollout)
+        working-directory: k8s/overlays/cd
+        run: |
+          kustomize edit set image \
+            "backend=$AR_REPO/backend:${{ github.sha }}" \
+            "frontend=$AR_REPO/frontend:${{ github.sha }}"
+
       - name: Deploy workloads
         run: kubectl apply -k k8s/overlays/cd
 
-      - name: Wait for rollout
+      # Verify the rollout completed AND the live app actually serves this
+      # commit, then auto-rollback if either check fails. The rollback lives
+      # inside this step (not a separate `if: failure()` job) so it only ever
+      # fires after we've applied — never reverting a good prior deploy because
+      # of an unrelated earlier failure.
+      - name: Verify rollout + smoke test (auto-rollback on failure)
         run: |
-          kubectl rollout status deployment/backend  -n gke-app --timeout=120s
-          kubectl rollout status deployment/frontend -n gke-app --timeout=120s
+          rollback() {
+            echo "::error::Deploy verification failed for ${{ github.sha }} — rolling back"
+            kubectl rollout undo deployment/backend  -n gke-app || true
+            kubectl rollout undo deployment/frontend -n gke-app || true
+            kubectl rollout status deployment/backend  -n gke-app --timeout=120s || true
+            kubectl rollout status deployment/frontend -n gke-app --timeout=120s || true
+            exit 1
+          }
+
+          # 1) Wait for the new ReplicaSets to become available.
+          kubectl rollout status deployment/backend  -n gke-app --timeout=120s || rollback
+          kubectl rollout status deployment/frontend -n gke-app --timeout=120s || rollback
+
+          # 2) Hit the public LoadBalancer and confirm BOTH tiers report this
+          #    commit (proves the new image is actually live, not just "rolled out").
+          WANT="${{ github.sha }}"
+          for i in $(seq 1 12); do
+            # `|| true` is REQUIRED: GitHub runs this with `bash -e`, and an
+            # unguarded assignment whose command substitution fails (Service not
+            # found yet / transient API error) would abort the step before the
+            # rollback path — i.e. a failed deploy that never rolls back.
+            IP=$(kubectl get svc frontend-service -n gke-app \
+                   -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            if [ -n "$IP" ]; then
+              BODY=$(curl -fsS -m 5 "http://$IP/api" || true)
+              FE=$(echo "$BODY" | jq -r '.frontendCommit // empty')
+              BE=$(echo "$BODY" | jq -r '.backend.commit // empty')
+              echo "attempt $i: ip=$IP frontendCommit=$FE backendCommit=$BE (want $WANT)"
+              if [ "$FE" = "$WANT" ] && [ "$BE" = "$WANT" ]; then
+                echo "✅ Smoke test passed: live app serves $WANT on both tiers."
+                exit 0
+              fi
+            else
+              echo "attempt $i: waiting for LoadBalancer IP..."
+            fi
+            sleep 10
+          done
+          rollback

@@ -1,4 +1,8 @@
 const request = require("supertest");
+
+// Pin a known commit so we can assert /version and /api surface it.
+process.env.GIT_SHA = "test-fe-456";
+
 const app = require("../src/server");
 
 describe("frontend server", () => {
@@ -10,6 +14,13 @@ describe("frontend server", () => {
     const res = await request(app).get("/healthz");
     expect(res.status).toBe(200);
     expect(res.text).toBe("ok");
+  });
+
+  test("GET /version returns the build commit", async () => {
+    const res = await request(app).get("/version");
+    expect(res.status).toBe(200);
+    expect(res.body.commit).toBe("test-fe-456");
+    expect(typeof res.body.pod).toBe("string");
   });
 
   test("GET / serves the static index page", async () => {
@@ -28,6 +39,7 @@ describe("frontend server", () => {
     expect(res.status).toBe(200);
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(typeof res.body.frontendPod).toBe("string");
+    expect(res.body.frontendCommit).toBe("test-fe-456");
     expect(res.body.backend.pod).toBe("backend-xyz");
   });
 
