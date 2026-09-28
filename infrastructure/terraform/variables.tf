@@ -39,6 +39,12 @@ variable "machine_type" {
   default     = "e2-medium"
 }
 
+variable "deletion_protection" {
+  description = "Block `terraform destroy` of the cluster. Keep false for a throwaway demo."
+  type        = bool
+  default     = false
+}
+
 variable "environment" {
   description = "Environment label (dev/prod)"
   type        = string
@@ -62,4 +68,10 @@ variable "ar_repository" {
   description = "Artifact Registry repository name that holds the app images"
   type        = string
   default     = "gke-app"
+}
+
+variable "create_ar_repository" {
+  description = "Create the Artifact Registry repository. Set false if it already exists outside Terraform."
+  type        = bool
+  default     = true
 }
